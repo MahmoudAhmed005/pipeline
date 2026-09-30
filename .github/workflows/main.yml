@@ -1,0 +1,93 @@
+name: Cloud Compressor Pipeline
+
+on:
+  workflow_dispatch:
+jobs:
+  compressor_node:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. ONE RESTORE STEP
+      - name: Restore Encrypted Backup
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_PAT }}
+          GH_USER: ${{ secrets.GH_USERNAME }}
+          REPO_NAME: ${{ secrets.BACKUP_REPO }} # Uses your typed input!
+          ENC_PASS: ${{ secrets.ENCRYPTION_PASS }}
+        run: |
+          cd /home/runner/work
+          git clone https://${GH_USER}:${GH_TOKEN}@github.com/${GH_USER}/${REPO_NAME}.git backup-repo || true
+          
+          if ls backup-repo/chunks/backup_part_* 1> /dev/null 2>&1; then
+            echo "Recombining chunks..."
+            cat backup-repo/chunks/backup_part_* > backup.tar.gz.enc
+            echo "Decrypting and restoring files..."
+            openssl enc -aes-256-cbc -d -pbkdf2 -pass pass:"$ENC_PASS" -in backup.tar.gz.enc | tar -xzf -
+          else
+            echo "No chunks found, creating fresh storage folders."
+            mkdir -p storage/raw storage/compressed
+          fi
+
+      # 2. RUN TAILSCALE
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: ${{ github.event.inputs.node_name }} # Forces a unique Tailscale IP/Name!
+          tags: tag:ci
+          args: --ssh
+
+      # 3. SETUP & KEEP ALIVE
+      - name: Setup Environment & Keep Alive
+        run: |
+          echo "Setting Tailscale SSH to use normal bash terminal..."
+          sudo usermod -s /bin/bash runner
+          
+          echo "Installing dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg aria2 kitty-terminfo
+          
+          cd /home/runner/work
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install fastapi uvicorn yt-dlp pydantic requests
+          
+          echo "☁️ Environment is prepped. Waiting for SSH connection..."
+          echo "Click 'Cancel Run' to trigger the secure backup and shutdown."
+          sleep 20700
+
+      # 4. ONE BACKUP STEP
+      - name: Encrypt Backup & Push to Repo
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_PAT }}
+          GH_USER: ${{ secrets.GH_USERNAME }}
+          REPO_NAME: ${{ github.event.inputs.backup_repo }} # Uses your typed input!
+          ENC_PASS: ${{ secrets.ENCRYPTION_PASS }}
+        run: |
+          cd /home/runner/work
+          echo "Compressing and encrypting storage on the fly..."
+          tar -czf - storage/ app.py 2>/dev/null | openssl enc -aes-256-cbc -pbkdf2 -salt -pass pass:"$ENC_PASS" -out backup.tar.gz.enc
+          
+          echo "Splitting encrypted file into 50MB chunks..."
+          mkdir -p backup-repo/chunks
+          rm -f backup-repo/chunks/backup_part_*
+          split -b 50M backup.tar.gz.enc backup-repo/chunks/backup_part_
+          
+          echo "Force-pushing encrypted chunks to GitHub..."
+          cd backup-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan temp-branch
+          git add chunks/
+          git commit -m "Automated Encrypted Backup [skip ci]"
+          git branch -M main
+          git push -f https://${GH_USER}:${GH_TOKEN}@github.com/${GH_USER}/${REPO_NAME}.git main
+
+      # 5. UPLOAD SECURE ARTIFACT
+      - name: Upload Encrypted Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.backup_repo }}-artifact
+          path: /home/runner/work/backup.tar.gz.enc
+          retention-days: 5
