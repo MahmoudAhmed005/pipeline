@@ -2,6 +2,7 @@ name: Cloud Compressor Pipeline
 
 on:
   workflow_dispatch:
+
 jobs:
   compressor_node:
     runs-on: ubuntu-latest
@@ -32,7 +33,7 @@ jobs:
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          hostname: ${{ github.event.inputs.node_name }} # Forces a unique Tailscale IP/Name!
+          hostname: gh-runner-ci # Fixed so your local gateway.py can find it!
           tags: tag:ci
           args: --ssh
 
@@ -61,7 +62,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.BACKUP_PAT }}
           GH_USER: ${{ secrets.GH_USERNAME }}
-          REPO_NAME: ${{ github.event.inputs.backup_repo }} # Uses your typed input!
+          REPO_NAME: ${{ secrets.BACKUP_REPO }} # Fixed to use your secret!
           ENC_PASS: ${{ secrets.ENCRYPTION_PASS }}
         run: |
           cd /home/runner/work
@@ -75,6 +76,14 @@ jobs:
           
           echo "Force-pushing encrypted chunks to GitHub..."
           cd backup-repo
+          
+          # FAILSAFE: If it is an empty repo, initialize it
+          if [ ! -d ".git" ]; then
+            echo "Initializing fresh git repository..."
+            git init
+            git branch -m main
+          fi
+          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout --orphan temp-branch
@@ -88,6 +97,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.backup_repo }}-artifact
+          name: storage-backup-encrypted
           path: /home/runner/work/backup.tar.gz.enc
           retention-days: 5
