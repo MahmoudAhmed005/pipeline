@@ -11,7 +11,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.BACKUP_PAT }}
           GH_USER: ${{ secrets.GH_USERNAME }}
-          REPO_NAME: ${{ secrets.BACKUP_REPO }} # Uses your typed input!
+          REPO_NAME: ${{ secrets.BACKUP_REPO }}
           ENC_PASS: ${{ secrets.ENCRYPTION_PASS }}
         run: |
           cd /home/runner/work
