@@ -11,12 +11,16 @@ jobs:
       - name: Restore Encrypted Backup
         env:
           GH_TOKEN: ${{ secrets.BACKUP_PAT }}
-          GH_USER: ${{ secrets.GH_USERNAME }}
           REPO_NAME: ${{ secrets.BACKUP_REPO }}
           ENC_PASS: ${{ secrets.ENCRYPTION_PASS }}
         run: |
           cd /home/runner/work
-          git clone https://${GH_USER}:${GH_TOKEN}@github.com/${GH_USER}/${REPO_NAME}.git backup-repo || true
+          
+          # Automatically strip any hidden spaces or newlines from your secrets
+          CLEAN_TOKEN=$(echo -n "$GH_TOKEN" | tr -d '[:space:]')
+          CLEAN_REPO=$(echo -n "$REPO_NAME" | tr -d '[:space:]')
+          
+          git clone "https://x-access-token:${CLEAN_TOKEN}@github.com/${{ github.repository_owner }}/${CLEAN_REPO}.git" backup-repo || true
           
           if ls backup-repo/chunks/backup_part_* 1> /dev/null 2>&1; then
             echo "Recombining chunks..."
@@ -33,7 +37,7 @@ jobs:
         uses: tailscale/github-action@v2
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          hostname: gh-runner-ci # Fixed so your local gateway.py can find it!
+          hostname: gh-runner-ci
           tags: tag:ci
           args: --ssh
 
@@ -61,11 +65,15 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.BACKUP_PAT }}
-          GH_USER: ${{ secrets.GH_USERNAME }}
-          REPO_NAME: ${{ secrets.BACKUP_REPO }} # Fixed to use your secret!
+          REPO_NAME: ${{ secrets.BACKUP_REPO }}
           ENC_PASS: ${{ secrets.ENCRYPTION_PASS }}
         run: |
           cd /home/runner/work
+          
+          # Automatically strip any hidden spaces or newlines from your secrets
+          CLEAN_TOKEN=$(echo -n "$GH_TOKEN" | tr -d '[:space:]')
+          CLEAN_REPO=$(echo -n "$REPO_NAME" | tr -d '[:space:]')
+          
           echo "Compressing and encrypting storage on the fly..."
           tar -czf - storage/ app.py 2>/dev/null | openssl enc -aes-256-cbc -pbkdf2 -salt -pass pass:"$ENC_PASS" -out backup.tar.gz.enc
           
@@ -90,7 +98,7 @@ jobs:
           git add chunks/
           git commit -m "Automated Encrypted Backup [skip ci]"
           git branch -M main
-          git push -f https://${GH_USER}:${GH_TOKEN}@github.com/${GH_USER}/${REPO_NAME}.git main
+          git push -f "https://x-access-token:${CLEAN_TOKEN}@github.com/${{ github.repository_owner }}/${CLEAN_REPO}.git" main
 
       # 5. UPLOAD SECURE ARTIFACT
       - name: Upload Encrypted Artifact
